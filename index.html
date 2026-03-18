@@ -26,8 +26,7 @@ td,th{border:1px solid #ccc;padding:.3em;}
 <div id="teacherPanel" class="hidden">
   <button onclick="startSession()">Start Session</button>
   <p>Current code: <span id="sessionCode"></span></p>
-  <h3>Pending Requests (open Sheet to approve)</h3>
-  <p>Teacher can open Google Sheet to approve requests.</p>
+  <p>Pending requests appear in your Google Sheet for approval.</p>
 </div>
 
 <!-- Student panel -->
@@ -44,12 +43,13 @@ td,th{border:1px solid #ccc;padding:.3em;}
 </div>
 
 <script>
+/* ----- CONFIGURATION ----- */
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyreB_GD5El7IB7Yz2e7309UDj2Y15gC5zEeeVJxPFElYJApRzzhg8NOSC-GrG0g7Z01w/exec';
 const TEACHER_PASSWORD = 'pass@135790';
 let currentCode = '';
 let teacherLat, teacherLon;
 
-// ---------- Teacher ----------
+/* ----- TEACHER FUNCTIONS ----- */
 function loginTeacher(){
   const p=document.getElementById('teacherPass').value;
   if(p===TEACHER_PASSWORD){
@@ -70,23 +70,41 @@ function startSession(){
   });
 }
 
-// ---------- Student ----------
+/* ----- STUDENT FUNCTIONS ----- */
 async function markAttendance(){
   const name=v('name'), roll=v('roll'), gmail=v('gmail'), code=v('code');
   if(!name||!roll||!gmail||!code){alert('Fill all fields');return;}
+
+  // Try Bluetooth first (Chrome/Android only)
+  let bluetoothOK = false;
+  if (navigator.bluetooth) {
+    try {
+      const device = await navigator.bluetooth.requestDevice({acceptAllDevices:true});
+      bluetoothOK = true;
+      await sendData('submitAttendance',{name,roll,gmail,sessionCode:code,verifiedBy:'Bluetooth'});
+      alert('Attendance marked by Bluetooth!');
+      return;
+    } catch(err) {
+      console.log('Bluetooth scan failed or cancelled:', err);
+    }
+  }
+
+  // Fallback to GPS
   navigator.geolocation.getCurrentPosition(async pos=>{
     const tLat=parseFloat(localStorage.getItem('teacherLat'));
     const tLon=parseFloat(localStorage.getItem('teacherLon'));
     const dist = distance(pos.coords.latitude,pos.coords.longitude,tLat,tLon);
-    if(dist<0.05){ // within 50 m
+    console.log('Distance (km):',dist);
+    if(dist<0.2){ // within 200 m
       await sendData('submitAttendance',{name,roll,gmail,sessionCode:code,verifiedBy:'GPS'});
-      alert('Attendance marked!');
+      alert('Attendance marked by GPS!');
     }else{
       document.getElementById('manualDiv').classList.remove('hidden');
     }
   },err=>{
+    console.log('GPS error:', err);
     document.getElementById('manualDiv').classList.remove('hidden');
-  });
+  },{enableHighAccuracy:false,timeout:10000});
 }
 
 async function sendManual(){
@@ -96,6 +114,7 @@ async function sendManual(){
   document.getElementById('manualDiv').classList.add('hidden');
 }
 
+/* ----- COMMON HELPERS ----- */
 async function sendData(action,obj){
   obj.action=action;
   await fetch(SCRIPT_URL,{
@@ -107,7 +126,7 @@ async function sendData(action,obj){
 function v(id){return document.getElementById(id).value;}
 
 function distance(lat1,lon1,lat2,lon2){
-  const R=6371;
+  const R=6371; // km
   const dLat=(lat2-lat1)*Math.PI/180;
   const dLon=(lon2-lon1)*Math.PI/180;
   const a=Math.sin(dLat/2)**2+
