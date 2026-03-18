@@ -4,52 +4,86 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Smart Attendance</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <style>
-body{font-family:sans-serif;margin:1em;}
+body{background:#f8f9fa;}
 .hidden{display:none;}
-button{margin:.3em;padding:.5em 1em;}
-table{border-collapse:collapse;width:100%;}
-td,th{border:1px solid #ccc;padding:.3em;}
+.fade-row{animation:fadeOut 5s forwards;}
+@keyframes fadeOut{0%{opacity:1;}100%{opacity:0;display:none;}}
 </style>
 </head>
-<body>
+<body class="container py-4">
 
-<h2>Smart Attendance</h2>
+<h2 class="text-center mb-4">Smart Attendance</h2>
 
 <!-- Teacher login -->
-<div id="teacherLogin">
-  <input id="teacherPass" type="password" placeholder="Teacher password">
-  <button onclick="loginTeacher()">Login</button>
+<div id="teacherLogin" class="text-center mb-3">
+  <input id="teacherPass" type="password" class="form-control d-inline-block w-auto" placeholder="Teacher password">
+  <button class="btn btn-primary" onclick="loginTeacher()">Login</button>
 </div>
 
 <!-- Teacher panel -->
 <div id="teacherPanel" class="hidden">
-  <button onclick="startSession()">Start Session</button>
-  <p>Current code: <span id="sessionCode"></span></p>
-  <p>Pending requests appear in your Google Sheet for approval.</p>
+  <div class="card p-3 mb-3 shadow-sm">
+    <div class="d-flex justify-content-between align-items-center">
+      <div>
+        <button class="btn btn-success me-2" onclick="startSession()">Start Session</button>
+        <button class="btn btn-danger" onclick="endSession()">End Session</button>
+      </div>
+      <div><strong>Current code:</strong> <span id="sessionCode">—</span></div>
+    </div>
+  </div>
+
+  <div class="card p-3 mb-3 shadow-sm">
+    <h5>Live Attendance Feed</h5>
+    <table class="table table-sm" id="liveTable">
+      <thead><tr><th>Name</th><th>Roll</th><th>Branch</th><th>Verified</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card p-3 shadow-sm hidden" id="summaryCard">
+    <h5>Session Summary</h5>
+    <p id="summaryText"></p>
+  </div>
 </div>
 
 <!-- Student panel -->
-<div id="studentPanel">
-  <input id="name" placeholder="Name">
-  <input id="roll" placeholder="Roll">
-  <input id="gmail" placeholder="Gmail">
-  <input id="code" placeholder="Session code">
-  <button onclick="markAttendance()">Mark Attendance</button>
-  <div id="manualDiv" class="hidden">
+<div id="studentPanel" class="card p-3 shadow-sm">
+  <h5 class="mb-3">Student Attendance</h5>
+  <div class="row g-2">
+    <div class="col-md-6"><input id="name" class="form-control" placeholder="Name"></div>
+    <div class="col-md-6"><input id="roll" class="form-control" placeholder="Roll"></div>
+    <div class="col-md-6"><input id="gmail" class="form-control" placeholder="Gmail"></div>
+    <div class="col-md-6">
+      <select id="branch" class="form-select">
+        <option value="">Select Branch</option>
+        <option>MCA</option>
+        <option>MDS</option>
+        <option>BTECH</option>
+        <option>MCS</option>
+        <option>MTECH</option>
+      </select>
+    </div>
+    <div class="col-md-6"><input id="code" class="form-control" placeholder="Session code"></div>
+    <div class="col-md-6 d-grid"><button class="btn btn-primary" onclick="markAttendance()">Mark Attendance</button></div>
+  </div>
+  <div id="manualDiv" class="hidden mt-3 text-center">
     <p>Verification failed. Request manual attendance?</p>
-    <button onclick="sendManual()">Send Request</button>
+    <button class="btn btn-warning" onclick="sendManual()">Send Request</button>
   </div>
 </div>
 
 <script>
-/* ----- CONFIGURATION ----- */
+/* ---------- CONFIG ---------- */
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyreB_GD5El7IB7Yz2e7309UDj2Y15gC5zEeeVJxPFElYJApRzzhg8NOSC-GrG0g7Z01w/exec';
 const TEACHER_PASSWORD = 'pass@135790';
 let currentCode = '';
 let teacherLat, teacherLon;
+let sessionActive = false;
+let liveFeed = [];
 
-/* ----- TEACHER FUNCTIONS ----- */
+/* ---------- TEACHER ---------- */
 function loginTeacher(){
   const p=document.getElementById('teacherPass').value;
   if(p===TEACHER_PASSWORD){
@@ -61,72 +95,91 @@ function loginTeacher(){
 function startSession(){
   currentCode = Math.floor(100000 + Math.random()*900000);
   document.getElementById('sessionCode').textContent = currentCode;
-  alert('Share this code with students: '+currentCode);
+  sessionActive = true;
+  localStorage.setItem('sessionActive','true');
+  localStorage.setItem('currentCode',currentCode);
   navigator.geolocation.getCurrentPosition(pos=>{
     teacherLat=pos.coords.latitude;
     teacherLon=pos.coords.longitude;
     localStorage.setItem('teacherLat',teacherLat);
     localStorage.setItem('teacherLon',teacherLon);
   });
+  document.getElementById('summaryCard').classList.add('hidden');
+  alert('Session started. Share code: '+currentCode);
 }
 
-/* ----- STUDENT FUNCTIONS ----- */
-async function markAttendance(){
-  const name=v('name'), roll=v('roll'), gmail=v('gmail'), code=v('code');
-  if(!name||!roll||!gmail||!code){alert('Fill all fields');return;}
+function endSession(){
+  sessionActive = false;
+  localStorage.setItem('sessionActive','false');
+  alert('Session ended. Attendance closed.');
+  showSummary();
+}
 
-  // Try Bluetooth first (Chrome/Android only)
-  let bluetoothOK = false;
-  if (navigator.bluetooth) {
-    try {
-      const device = await navigator.bluetooth.requestDevice({acceptAllDevices:true});
-      bluetoothOK = true;
-      await sendData('submitAttendance',{name,roll,gmail,sessionCode:code,verifiedBy:'Bluetooth'});
-      alert('Attendance marked by Bluetooth!');
-      return;
-    } catch(err) {
-      console.log('Bluetooth scan failed or cancelled:', err);
-    }
+async function showSummary(){
+  const res = await fetch(SCRIPT_URL+'?action=getSummary&code='+currentCode);
+  try{
+    const data = await res.json();
+    document.getElementById('summaryText').innerHTML =
+      `<strong>Total present:</strong> ${data.count}<br><strong>Session code:</strong> ${currentCode}`;
+  }catch(e){
+    document.getElementById('summaryText').textContent='Summary unavailable (check sheet).';
   }
+  document.getElementById('summaryCard').classList.remove('hidden');
+}
 
-  // Fallback to GPS
+/* ---------- STUDENT ---------- */
+async function markAttendance(){
+  if(localStorage.getItem('sessionActive')!=='true'){alert('Attendance session has ended.');return;}
+  const name=v('name'), roll=v('roll'), gmail=v('gmail'), branch=v('branch'), code=v('code');
+  if(!name||!roll||!gmail||!branch||!code){alert('Fill all fields');return;}
+
+  // Save for auto‑fill
+  localStorage.setItem('studentName',name);
+  localStorage.setItem('studentRoll',roll);
+  localStorage.setItem('studentGmail',gmail);
+  localStorage.setItem('studentBranch',branch);
+
   navigator.geolocation.getCurrentPosition(async pos=>{
     const tLat=parseFloat(localStorage.getItem('teacherLat'));
     const tLon=parseFloat(localStorage.getItem('teacherLon'));
     const dist = distance(pos.coords.latitude,pos.coords.longitude,tLat,tLon);
-    console.log('Distance (km):',dist);
     if(dist<0.2){ // within 200 m
-      await sendData('submitAttendance',{name,roll,gmail,sessionCode:code,verifiedBy:'GPS'});
-      alert('Attendance marked by GPS!');
+      await sendData('submitAttendance',{name,roll,gmail,branch,sessionCode:code,verifiedBy:'GPS'});
+      alert('Attendance marked!');
+      addLiveRow({name,roll,branch,verifiedBy:'GPS'});
     }else{
       document.getElementById('manualDiv').classList.remove('hidden');
     }
   },err=>{
-    console.log('GPS error:', err);
     document.getElementById('manualDiv').classList.remove('hidden');
   },{enableHighAccuracy:false,timeout:10000});
 }
 
 async function sendManual(){
-  const name=v('name'), roll=v('roll'), gmail=v('gmail'), code=v('code');
-  await sendData('submitManualRequest',{name,roll,gmail,sessionCode:code});
+  const name=v('name'), roll=v('roll'), gmail=v('gmail'), branch=v('branch'), code=v('code');
+  await sendData('submitManualRequest',{name,roll,gmail,branch,sessionCode:code});
   alert('Manual request sent.');
   document.getElementById('manualDiv').classList.add('hidden');
 }
 
-/* ----- COMMON HELPERS ----- */
 async function sendData(action,obj){
   obj.action=action;
-  await fetch(SCRIPT_URL,{
-    method:'POST',
-    body:JSON.stringify(obj)
-  });
+  await fetch(SCRIPT_URL,{method:'POST',body:JSON.stringify(obj)});
 }
 
-function v(id){return document.getElementById(id).value;}
+/* ---------- LIVE FEED ---------- */
+function addLiveRow(entry){
+  const tbody=document.querySelector('#liveTable tbody');
+  const row=document.createElement('tr');
+  row.innerHTML=`<td>${entry.name}</td><td>${entry.roll}</td><td>${entry.branch}</td><td>${entry.verifiedBy}</td>`;
+  tbody.prepend(row);
+  setTimeout(()=>row.classList.add('fade-row'),4000);
+}
 
+/* ---------- HELPERS ---------- */
+function v(id){return document.getElementById(id).value;}
 function distance(lat1,lon1,lat2,lon2){
-  const R=6371; // km
+  const R=6371;
   const dLat=(lat2-lat1)*Math.PI/180;
   const dLon=(lon2-lon1)*Math.PI/180;
   const a=Math.sin(dLat/2)**2+
@@ -134,6 +187,14 @@ function distance(lat1,lon1,lat2,lon2){
           Math.sin(dLon/2)**2;
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
+
+/* ---------- AUTO‑FILL ---------- */
+window.onload=function(){
+  document.getElementById('name').value=localStorage.getItem('studentName')||'';
+  document.getElementById('roll').value=localStorage.getItem('studentRoll')||'';
+  document.getElementById('gmail').value=localStorage.getItem('studentGmail')||'';
+  document.getElementById('branch').value=localStorage.getItem('studentBranch')||'';
+};
 </script>
 </body>
 </html>
