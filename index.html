@@ -129,7 +129,7 @@ async function showSummary(){
 
 /* ---------- STUDENT ---------- */
 async function markAttendance(){
-  if(localStorage.getItem('sessionActive')!=='true'){alert('Attendance session has ended.');return;}
+//   if(localStorage.getItem('sessionActive')!=='true'){alert('Attendance session has ended.');return;}
   const name=v('name'), roll=v('roll'), gmail=v('gmail'), branch=v('branch'), code=v('code');
   if(!name||!roll||!gmail||!branch||!code){alert('Fill all fields');return;}
 
