@@ -7,7 +7,7 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <!-- QR generation and scanning libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://unpkg.com/html5-qrcode@2.3.10/minified/html5-qrcode.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode"></script>
 <style>
 body{background:#f8f9fa;}
 .hidden{display:none;}
@@ -58,7 +58,7 @@ body{background:#f8f9fa;}
     </div>
     <div class="text-center mt-3">
       <div id="qrcode"></div>
-      <p class="text-muted mt-2">Students can scan this QR code using their phone camera.</p>
+      <p class="text-muted mt-2">Students scan this QR code using the in‑app scanner.</p>
     </div>
   </div>
 
@@ -111,7 +111,6 @@ body{background:#f8f9fa;}
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbycG3dntlbnYeR_ty2marQZk78RFp_BFuN9BPzHjOhebbuZdbMJ16GLb57NIc2jaS7gpg/exec';
 const TEACHER_PASSWORD = 'pass@135790';
 let currentCode = '';
-let teacherLat, teacherLon;
 let qrTimer;
 let qrInterval = 10;
 let html5QrCode;
@@ -130,13 +129,6 @@ function startSession(){
   const customVal=parseInt(document.getElementById('customInterval').value);
   qrInterval = customVal>0?customVal:dropdownVal;
 
-  navigator.geolocation.getCurrentPosition(pos=>{
-    teacherLat=pos.coords.latitude;
-    teacherLon=pos.coords.longitude;
-    localStorage.setItem('teacherLat',teacherLat);
-    localStorage.setItem('teacherLon',teacherLon);
-  });
-
   document.getElementById('summaryCard').classList.add('hidden');
   alert('Session started. QR code will refresh every '+qrInterval+' seconds.');
   generateQR(); // first QR
@@ -146,7 +138,6 @@ function startSession(){
 function generateQR(){
   currentCode = Math.floor(100000 + Math.random()*900000);
   document.getElementById('sessionCode').textContent = currentCode;
-  localStorage.setItem('currentCode',currentCode);
   const qrDiv=document.getElementById('qrcode');
   qrDiv.innerHTML='';
   new QRCode(qrDiv,{text:currentCode,width:180,height:180});
@@ -172,24 +163,38 @@ async function showSummary(){
 }
 
 /* ---------- STUDENT ---------- */
-async function startScan(){
-  try{
-    const readerDiv=document.getElementById('reader');
-    readerDiv.classList.remove('hidden');
-    if(!window.Html5Qrcode){alert("Scanner library not loaded.");return;}
+async function startScan() {
+  const readerDiv = document.getElementById('reader');
+  readerDiv.classList.remove('hidden');
+
+  try {
+    if (typeof Html5Qrcode === 'undefined') {
+      throw new Error("QR Library not loaded. Check internet connection.");
+    }
+
+    if (html5QrCode && html5QrCode.getState && html5QrCode.getState() === 2) {
+      await html5QrCode.stop();
+    }
+
     html5QrCode = new Html5Qrcode("reader");
+    const qrConfig = { fps: 10, qrbox: { width: 250, height: 250 } };
+
     await html5QrCode.start(
       { facingMode: "environment" },
-      { fps: 10, qrbox: 250 },
-      (decodedText)=>{
-        html5QrCode.stop();
-        readerDiv.classList.add('hidden');
-        markAttendance(decodedText);
+      qrConfig,
+      (decodedText) => {
+        console.log("QR Decoded:", decodedText);
+        html5QrCode.stop().then(() => {
+          readerDiv.classList.add('hidden');
+          markAttendance(decodedText);
+        });
       },
-      (errorMessage)=>{}
+      (errorMessage) => { /* scanning... */ }
     );
-  }catch(err){
-    alert("Camera start failed: "+err);
+  } catch (err) {
+    console.error("Scanner Error:", err);
+    alert("Camera Error: " + err.message);
+    readerDiv.classList.add('hidden');
   }
 }
 
@@ -202,20 +207,18 @@ async function markAttendance(scannedCode){
   localStorage.setItem('studentGmail',gmail);
   localStorage.setItem('studentBranch',branch);
 
-  navigator.geolocation.getCurrentPosition(async pos=>{
-    const tLat=parseFloat(localStorage.getItem('teacherLat'));
-    const tLon=parseFloat(localStorage.getItem('teacherLon'));
-    const dist = distance(pos.coords.latitude,pos.coords.longitude,tLat,tLon);
-    if(dist<0.2){ // within 200 m
-      await sendData('submitAttendance',{name,roll,gmail,branch,sessionCode:scannedCode,verifiedBy:'GPS'});
-      alert('Attendance marked!');
-      addLiveRow({name,roll,branch,verifiedBy:'GPS'});
-    }else{
-      document.getElementById('manualDiv').classList.remove('hidden');
-    }
-  },err=>{
-    document.getElementById('manualDiv').classList.remove('hidden');
-  },{enableHighAccuracy:false,timeout:10000});
+  // Skip GPS distance check for now (teacher coords not shared)
+  try {
+    await sendData('submitAttendance',{
+      name, roll, gmail, branch,
+      sessionCode: scannedCode,
+      verifiedBy: 'QR‑Only'
+    });
+    alert('Attendance marked successfully!');
+    addLiveRow({name, roll, branch, verifiedBy:'QR‑Only'});
+  } catch(e){
+    alert('Error submitting attendance: '+e);
+  }
 }
 
 async function sendManual(){
@@ -241,15 +244,6 @@ function addLiveRow(entry){
 
 /* ---------- HELPERS ---------- */
 function v(id){return document.getElementById(id).value;}
-function distance(lat1,lon1,lat2,lon2){
-  const R=6371;
-  const dLat=(lat2-lat1)*Math.PI/180;
-  const dLon=(lon2-lon1)*Math.PI/180;
-  const a=Math.sin(dLat/2)**2+
-          Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
-          Math.sin(dLon/2)**2;
-  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-}
 
 /* ---------- AUTO‑FILL ---------- */
 window.onload=function(){
