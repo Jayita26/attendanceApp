@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Smart Attendance</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<!-- QR generation and scanning libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode"></script>
 <style>
@@ -78,7 +77,7 @@ body{background:#f8f9fa;}
 
 <!-- Student panel -->
 <div id="studentPanel" class="card p-3 shadow-sm">
-  <h5 class="mb-3">Student Attendance</h5>
+  <h5 class="mb-3">Student Registration / Attendance</h5>
   <div class="row g-2">
     <div class="col-md-6"><input id="name" class="form-control" placeholder="Name"></div>
     <div class="col-md-6"><input id="roll" class="form-control" placeholder="Roll"></div>
@@ -92,6 +91,9 @@ body{background:#f8f9fa;}
         <option>MCS</option>
         <option>MTECH</option>
       </select>
+    </div>
+    <div class="col-12 d-grid">
+      <button class="btn btn-secondary" onclick="registerDevice()">Register Device</button>
     </div>
     <div class="col-12 d-grid">
       <button class="btn btn-primary" onclick="startScan()">📷 Scan QR Code</button>
@@ -108,12 +110,18 @@ body{background:#f8f9fa;}
 
 <script>
 /* ---------- CONFIG ---------- */
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbycG3dntlbnYeR_ty2marQZk78RFp_BFuN9BPzHjOhebbuZdbMJ16GLb57NIc2jaS7gpg/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzREw3RQJx0iqJb8xwTwVFHH4IcYn5PzBGx9hIZOlWbT58o_N3FyW59s07Qa-VX7bLegg/exec';
 const TEACHER_PASSWORD = 'pass@135790';
 let currentCode = '';
 let qrTimer;
 let qrInterval = 10;
 let html5QrCode;
+
+/* ---------- DEVICE ID ---------- */
+if(!localStorage.getItem('deviceId')){
+  localStorage.setItem('deviceId', crypto.randomUUID());
+}
+const deviceId = localStorage.getItem('deviceId');
 
 /* ---------- TEACHER ---------- */
 function loginTeacher(){
@@ -128,10 +136,9 @@ function startSession(){
   const dropdownVal=parseInt(document.getElementById('intervalSelect').value);
   const customVal=parseInt(document.getElementById('customInterval').value);
   qrInterval = customVal>0?customVal:dropdownVal;
-
   document.getElementById('summaryCard').classList.add('hidden');
   alert('Session started. QR code will refresh every '+qrInterval+' seconds.');
-  generateQR(); // first QR
+  generateQR();
   qrTimer=setInterval(generateQR, qrInterval*1000);
 }
 
@@ -151,74 +158,75 @@ function endSession(){
 }
 
 async function showSummary(){
-  const res = await fetch(SCRIPT_URL+'?action=getSummary&code='+currentCode);
-  try{
-    const data = await res.json();
-    document.getElementById('summaryText').innerHTML =
-      `<strong>Total present:</strong> ${data.count}<br><strong>Last code:</strong> ${currentCode}`;
-  }catch(e){
-    document.getElementById('summaryText').textContent='Summary unavailable (check sheet).';
-  }
+  document.getElementById('summaryText').innerHTML =
+    `<strong>Session ended.</strong> Check Google Sheet for details.`;
   document.getElementById('summaryCard').classList.remove('hidden');
 }
 
 /* ---------- STUDENT ---------- */
-async function startScan() {
-  const readerDiv = document.getElementById('reader');
+async function registerDevice(){
+  const name=v('name'), roll=v('roll'), gmail=v('gmail'), branch=v('branch');
+  if(!name||!roll||!gmail||!branch){alert('Fill all fields');return;}
+  const res = await fetch(SCRIPT_URL,{
+    method:'POST',
+    body:JSON.stringify({action:'registerDevice',name,roll,gmail,branch,deviceId})
+  });
+  const text = await res.text();
+  if(text==='registered') alert('Device registered successfully!');
+  else if(text==='already_registered') alert('Device already registered for this roll.');
+  else alert('Registration failed: '+text);
+}
+
+async function startScan(){
+  const roll=v('roll');
+  if(!roll){alert('Enter roll number before scanning.');return;}
+  const valid = await validateDevice(roll);
+  if(!valid) return;
+
+  const readerDiv=document.getElementById('reader');
   readerDiv.classList.remove('hidden');
-
-  try {
-    if (typeof Html5Qrcode === 'undefined') {
-      throw new Error("QR Library not loaded. Check internet connection.");
-    }
-
-    if (html5QrCode && html5QrCode.getState && html5QrCode.getState() === 2) {
-      await html5QrCode.stop();
-    }
-
-    html5QrCode = new Html5Qrcode("reader");
-    const qrConfig = { fps: 10, qrbox: { width: 250, height: 250 } };
-
+  try{
+    if(typeof Html5Qrcode==='undefined') throw new Error('QR library not loaded');
+    if(html5QrCode && html5QrCode.getState && html5QrCode.getState()===2) await html5QrCode.stop();
+    html5QrCode=new Html5Qrcode('reader');
     await html5QrCode.start(
-      { facingMode: "environment" },
-      qrConfig,
-      (decodedText) => {
-        console.log("QR Decoded:", decodedText);
-        html5QrCode.stop().then(() => {
+      {facingMode:'environment'},
+      {fps:10,qrbox:{width:250,height:250}},
+      decodedText=>{
+        html5QrCode.stop().then(()=>{
           readerDiv.classList.add('hidden');
           markAttendance(decodedText);
         });
       },
-      (errorMessage) => { /* scanning... */ }
+      ()=>{}
     );
-  } catch (err) {
-    console.error("Scanner Error:", err);
-    alert("Camera Error: " + err.message);
+  }catch(err){
+    alert('Camera error: '+err.message);
     readerDiv.classList.add('hidden');
   }
+}
+
+async function validateDevice(roll){
+  const res = await fetch(`${SCRIPT_URL}?action=validateDevice&roll=${roll}&deviceId=${deviceId}`);
+  const text = await res.text();
+  if(text!=='valid'){
+    alert('This device is not registered for this roll.');
+    return false;
+  }
+  return true;
 }
 
 async function markAttendance(scannedCode){
   const name=v('name'), roll=v('roll'), gmail=v('gmail'), branch=v('branch');
   if(!name||!roll||!gmail||!branch){alert('Fill all fields');return;}
 
-  localStorage.setItem('studentName',name);
-  localStorage.setItem('studentRoll',roll);
-  localStorage.setItem('studentGmail',gmail);
-  localStorage.setItem('studentBranch',branch);
-
-  // Skip GPS distance check for now (teacher coords not shared)
-  try {
-    await sendData('submitAttendance',{
-      name, roll, gmail, branch,
-      sessionCode: scannedCode,
-      verifiedBy: 'QR‑Only'
-    });
-    alert('Attendance marked successfully!');
-    addLiveRow({name, roll, branch, verifiedBy:'QR‑Only'});
-  } catch(e){
-    alert('Error submitting attendance: '+e);
-  }
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const lat=pos.coords.latitude, lon=pos.coords.longitude;
+    await sendData('submitAttendance',{name,roll,gmail,branch,deviceId,sessionCode:scannedCode,verifiedBy:`QR+GPS(${lat.toFixed(4)},${lon.toFixed(4)})`});
+  },async err=>{
+    alert('GPS failed, submitting without location.');
+    await sendData('submitAttendance',{name,roll,gmail,branch,deviceId,sessionCode:scannedCode,verifiedBy:'QR‑Only'});
+  });
 }
 
 async function sendManual(){
@@ -230,7 +238,11 @@ async function sendManual(){
 
 async function sendData(action,obj){
   obj.action=action;
-  await fetch(SCRIPT_URL,{method:'POST',body:JSON.stringify(obj)});
+  const res = await fetch(SCRIPT_URL,{method:'POST',body:JSON.stringify(obj)});
+  const text = await res.text();
+  if(text==='duplicate') alert('Attendance already submitted within the last hour.');
+  else if(text==='ok') alert('Attendance marked successfully!');
+  else alert('Response: '+text);
 }
 
 /* ---------- LIVE FEED ---------- */
@@ -244,14 +256,6 @@ function addLiveRow(entry){
 
 /* ---------- HELPERS ---------- */
 function v(id){return document.getElementById(id).value;}
-
-/* ---------- AUTO‑FILL ---------- */
-window.onload=function(){
-  document.getElementById('name').value=localStorage.getItem('studentName')||'';
-  document.getElementById('roll').value=localStorage.getItem('studentRoll')||'';
-  document.getElementById('gmail').value=localStorage.getItem('studentGmail')||'';
-  document.getElementById('branch').value=localStorage.getItem('studentBranch')||'';
-};
 </script>
 </body>
 </html>
