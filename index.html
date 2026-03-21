@@ -100,7 +100,7 @@ body{background:#f8f9fa;}
 
 <script>
 /* ---------- CONFIG ---------- */
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzREw3RQJx0iqJb8xwTwVFHH4IcYn5PzBGx9hIZOlWbT58o_N3FyW59s07Qa-VX7bLegg/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwhthjCpUhO02oDs3Ui4FiUnnPSFv7tZEDrvL6b2sjjtvwDdOp5rQWtfCNpAoCHmOLxzA/exec';
 const TEACHER_PASSWORD = 'pass@135790';
 let currentCode = '';
 let qrTimer;
@@ -159,31 +159,42 @@ async function registerDevice(){
   else alert('Registration failed: '+text);
 }
 
-async function startScan(){
+async function startScan() {
   const roll=v('roll');
   if(!roll){alert('Enter roll number before scanning.');return;}
   const valid = await validateDevice(roll);
   if(!valid) return;
 
-  const readerDiv=document.getElementById('reader');
+  const readerDiv = document.getElementById('reader');
   readerDiv.classList.remove('hidden');
-  try{
-    if(typeof Html5Qrcode==='undefined') throw new Error('QR library not loaded');
-    if(html5QrCode && html5QrCode.getState && html5QrCode.getState()===2) await html5QrCode.stop();
-    html5QrCode=new Html5Qrcode('reader');
+
+  try {
+    if (typeof Html5Qrcode === 'undefined') {
+      throw new Error("QR Library not loaded. Check internet connection.");
+    }
+
+    if (html5QrCode && html5QrCode.getState && html5QrCode.getState() === 2) {
+      await html5QrCode.stop();
+    }
+
+    html5QrCode = new Html5Qrcode("reader");
+    const qrConfig = { fps: 10, qrbox: { width: 250, height: 250 } };
+
     await html5QrCode.start(
-      {facingMode:'environment'},
-      {fps:10,qrbox:{width:250,height:250}},
-      decodedText=>{
-        html5QrCode.stop().then(()=>{
+      { facingMode: "environment" },
+      qrConfig,
+      (decodedText) => {
+        console.log("QR Decoded:", decodedText);
+        html5QrCode.stop().then(() => {
           readerDiv.classList.add('hidden');
           markAttendance(decodedText);
         });
       },
-      ()=>{}
+      (errorMessage) => { /* scanning... */ }
     );
-  }catch(err){
-    alert('Camera error: '+err.message);
+  } catch (err) {
+    console.error("Scanner Error:", err);
+    alert("Camera Error: " + err.message);
     readerDiv.classList.add('hidden');
   }
 }
@@ -201,12 +212,16 @@ async function validateDevice(roll){
 async function markAttendance(scannedCode){
   const name=v('name'), roll=v('roll'), gmail=v('gmail'), branch=v('branch');
   if(!name||!roll||!gmail||!branch){alert('Fill all fields');return;}
-  await sendData('submitAttendance',{name,roll,gmail,branch,deviceId,sessionCode:scannedCode,verifiedBy:'QR‑Only'});
-}
-
-async function sendData(action,obj){
-  obj.action=action;
-  const res = await fetch(SCRIPT_URL,{method:'POST',body:JSON.stringify(obj)});
+  const res = await fetch(SCRIPT_URL,{
+    method:'POST',
+    body:JSON.stringify({
+      action:'submitAttendance',
+      name, roll, gmail, branch,
+      deviceId,
+      sessionCode: scannedCode,
+      verifiedBy:'QR‑Only'
+    })
+  });
   const text = await res.text();
   if(text==='duplicate') alert('Attendance already submitted within the last hour.');
   else if(text==='ok') alert('Attendance marked successfully!');
