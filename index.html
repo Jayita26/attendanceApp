@@ -5,11 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Smart Attendance</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 body{background:#f8f9fa;}
 .hidden{display:none;}
 .fade-row{animation:fadeOut 5s forwards;}
 @keyframes fadeOut{0%{opacity:1;}100%{opacity:0;display:none;}}
+#qrcode canvas{margin:auto;display:block;}
 </style>
 </head>
 <body class="container py-4">
@@ -25,12 +27,34 @@ body{background:#f8f9fa;}
 <!-- Teacher panel -->
 <div id="teacherPanel" class="hidden">
   <div class="card p-3 mb-3 shadow-sm">
-    <div class="d-flex justify-content-between align-items-center">
-      <div>
+    <div class="row align-items-center">
+      <div class="col-md-6">
         <button class="btn btn-success me-2" onclick="startSession()">Start Session</button>
         <button class="btn btn-danger" onclick="endSession()">End Session</button>
       </div>
-      <div><strong>Current code:</strong> <span id="sessionCode">—</span></div>
+      <div class="col-md-6 text-end">
+        <strong>Current code:</strong> <span id="sessionCode">—</span>
+      </div>
+    </div>
+    <hr>
+    <div class="row g-2 align-items-center">
+      <div class="col-md-6">
+        <label for="intervalSelect" class="form-label">QR refresh interval</label>
+        <select id="intervalSelect" class="form-select">
+          <option value="5">5 seconds</option>
+          <option value="10">10 seconds</option>
+          <option value="30">30 seconds</option>
+          <option value="60">1 minute</option>
+          <option value="300">5 minutes</option>
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label for="customInterval" class="form-label">Custom seconds</label>
+        <input id="customInterval" type="number" class="form-control" placeholder="Enter seconds (optional)">
+      </div>
+    </div>
+    <div class="text-center mt-3">
+      <div id="qrcode"></div>
     </div>
   </div>
 
@@ -65,7 +89,7 @@ body{background:#f8f9fa;}
         <option>MTECH</option>
       </select>
     </div>
-    <div class="col-md-6"><input id="code" class="form-control" placeholder="Session code"></div>
+    <div class="col-md-6"><input id="code" class="form-control" placeholder="Session code (from QR)"></div>
     <div class="col-md-6 d-grid"><button class="btn btn-primary" onclick="markAttendance()">Mark Attendance</button></div>
   </div>
   <div id="manualDiv" class="hidden mt-3 text-center">
@@ -80,8 +104,9 @@ const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbycG3dntlbnYeR_ty2ma
 const TEACHER_PASSWORD = 'pass@135790';
 let currentCode = '';
 let teacherLat, teacherLon;
+let qrTimer;
+let qrInterval = 10;
 let sessionActive = false;
-let liveFeed = [];
 
 /* ---------- TEACHER ---------- */
 function loginTeacher(){
@@ -93,24 +118,38 @@ function loginTeacher(){
 }
 
 function startSession(){
-  currentCode = Math.floor(100000 + Math.random()*900000);
-  document.getElementById('sessionCode').textContent = currentCode;
+  // Determine interval
+  const dropdownVal=parseInt(document.getElementById('intervalSelect').value);
+  const customVal=parseInt(document.getElementById('customInterval').value);
+  qrInterval = customVal>0?customVal:dropdownVal;
+
   sessionActive = true;
-  localStorage.setItem('sessionActive','true');
-  localStorage.setItem('currentCode',currentCode);
   navigator.geolocation.getCurrentPosition(pos=>{
     teacherLat=pos.coords.latitude;
     teacherLon=pos.coords.longitude;
     localStorage.setItem('teacherLat',teacherLat);
     localStorage.setItem('teacherLon',teacherLon);
   });
+
   document.getElementById('summaryCard').classList.add('hidden');
-  alert('Session started. Share code: '+currentCode);
+  alert('Session started. QR code will refresh every '+qrInterval+' seconds.');
+  generateQR(); // first QR
+  qrTimer=setInterval(generateQR, qrInterval*1000);
+}
+
+function generateQR(){
+  currentCode = Math.floor(100000 + Math.random()*900000);
+  document.getElementById('sessionCode').textContent = currentCode;
+  localStorage.setItem('currentCode',currentCode);
+  const qrDiv=document.getElementById('qrcode');
+  qrDiv.innerHTML='';
+  new QRCode(qrDiv,{text:currentCode,width:180,height:180});
 }
 
 function endSession(){
   sessionActive = false;
-  localStorage.setItem('sessionActive','false');
+  clearInterval(qrTimer);
+  document.getElementById('qrcode').innerHTML='';
   alert('Session ended. Attendance closed.');
   showSummary();
 }
@@ -120,7 +159,7 @@ async function showSummary(){
   try{
     const data = await res.json();
     document.getElementById('summaryText').innerHTML =
-      `<strong>Total present:</strong> ${data.count}<br><strong>Session code:</strong> ${currentCode}`;
+      `<strong>Total present:</strong> ${data.count}<br><strong>Last code:</strong> ${currentCode}`;
   }catch(e){
     document.getElementById('summaryText').textContent='Summary unavailable (check sheet).';
   }
@@ -129,11 +168,9 @@ async function showSummary(){
 
 /* ---------- STUDENT ---------- */
 async function markAttendance(){
-//   if(localStorage.getItem('sessionActive')!=='true'){alert('Attendance session has ended.');return;}
   const name=v('name'), roll=v('roll'), gmail=v('gmail'), branch=v('branch'), code=v('code');
   if(!name||!roll||!gmail||!branch||!code){alert('Fill all fields');return;}
 
-  // Save for auto‑fill
   localStorage.setItem('studentName',name);
   localStorage.setItem('studentRoll',roll);
   localStorage.setItem('studentGmail',gmail);
