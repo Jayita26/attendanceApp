@@ -68,11 +68,6 @@ body{background:#f8f9fa;}
       <tbody></tbody>
     </table>
   </div>
-
-  <div class="card p-3 shadow-sm hidden" id="summaryCard">
-    <h5>Session Summary</h5>
-    <p id="summaryText"></p>
-  </div>
 </div>
 
 <!-- Student panel -->
@@ -101,11 +96,6 @@ body{background:#f8f9fa;}
   </div>
 
   <div id="reader" class="hidden mt-3"></div>
-
-  <div id="manualDiv" class="hidden mt-3 text-center">
-    <p>Verification failed. Request manual attendance?</p>
-    <button class="btn btn-warning" onclick="sendManual()">Send Request</button>
-  </div>
 </div>
 
 <script>
@@ -136,7 +126,6 @@ function startSession(){
   const dropdownVal=parseInt(document.getElementById('intervalSelect').value);
   const customVal=parseInt(document.getElementById('customInterval').value);
   qrInterval = customVal>0?customVal:dropdownVal;
-  document.getElementById('summaryCard').classList.add('hidden');
   alert('Session started. QR code will refresh every '+qrInterval+' seconds.');
   generateQR();
   qrTimer=setInterval(generateQR, qrInterval*1000);
@@ -154,13 +143,6 @@ function endSession(){
   clearInterval(qrTimer);
   document.getElementById('qrcode').innerHTML='';
   alert('Session ended. Attendance closed.');
-  showSummary();
-}
-
-async function showSummary(){
-  document.getElementById('summaryText').innerHTML =
-    `<strong>Session ended.</strong> Check Google Sheet for details.`;
-  document.getElementById('summaryCard').classList.remove('hidden');
 }
 
 /* ---------- STUDENT ---------- */
@@ -219,21 +201,7 @@ async function validateDevice(roll){
 async function markAttendance(scannedCode){
   const name=v('name'), roll=v('roll'), gmail=v('gmail'), branch=v('branch');
   if(!name||!roll||!gmail||!branch){alert('Fill all fields');return;}
-
-  navigator.geolocation.getCurrentPosition(async pos=>{
-    const lat=pos.coords.latitude, lon=pos.coords.longitude;
-    await sendData('submitAttendance',{name,roll,gmail,branch,deviceId,sessionCode:scannedCode,verifiedBy:`QR+GPS(${lat.toFixed(4)},${lon.toFixed(4)})`});
-  },async err=>{
-    alert('GPS failed, submitting without location.');
-    await sendData('submitAttendance',{name,roll,gmail,branch,deviceId,sessionCode:scannedCode,verifiedBy:'QR‑Only'});
-  });
-}
-
-async function sendManual(){
-  const name=v('name'), roll=v('roll'), gmail=v('gmail'), branch=v('branch');
-  await sendData('submitManualRequest',{name,roll,gmail,branch,sessionCode:'manual'});
-  alert('Manual request sent.');
-  document.getElementById('manualDiv').classList.add('hidden');
+  await sendData('submitAttendance',{name,roll,gmail,branch,deviceId,sessionCode:scannedCode,verifiedBy:'QR‑Only'});
 }
 
 async function sendData(action,obj){
@@ -243,15 +211,6 @@ async function sendData(action,obj){
   if(text==='duplicate') alert('Attendance already submitted within the last hour.');
   else if(text==='ok') alert('Attendance marked successfully!');
   else alert('Response: '+text);
-}
-
-/* ---------- LIVE FEED ---------- */
-function addLiveRow(entry){
-  const tbody=document.querySelector('#liveTable tbody');
-  const row=document.createElement('tr');
-  row.innerHTML=`<td>${entry.name}</td><td>${entry.roll}</td><td>${entry.branch}</td><td>${entry.verifiedBy}</td>`;
-  tbody.prepend(row);
-  setTimeout(()=>row.classList.add('fade-row'),4000);
 }
 
 /* ---------- HELPERS ---------- */
